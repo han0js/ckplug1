@@ -1992,7 +1992,6 @@ class GenerationMixin:
         rank_shift_threshold: int = 50,
         rank_margin: int = 5,
         topk_overlap_threshold: float = 0.4,
-        cg_high_threshold: float = 0.83,
 
         logits_processor: Optional[LogitsProcessorList] = None,
         logits_processor_student: Optional[LogitsProcessorList] = None,
@@ -2366,7 +2365,6 @@ class GenerationMixin:
                 rank_shift_threshold=rank_shift_threshold,
                 rank_margin=rank_margin,
                 topk_overlap_threshold=topk_overlap_threshold,
-                cg_high_threshold=cg_high_threshold,
 
                 logits_processor=prepared_logits_processor,
                 logits_processor_student=prepared_logits_processor_student,
@@ -2411,7 +2409,6 @@ class GenerationMixin:
                 rank_shift_threshold=rank_shift_threshold,
                 rank_margin=rank_margin,
                 topk_overlap_threshold=topk_overlap_threshold,
-                cg_high_threshold=cg_high_threshold,
 
                 logits_processor=prepared_logits_processor,
                 logits_processor_student=prepared_logits_processor_student,
@@ -2758,7 +2755,6 @@ class GenerationMixin:
         rank_shift_threshold: int,
         rank_margin: int,
         topk_overlap_threshold: float,
-        cg_high_threshold: float,
 
         stopping_criteria: StoppingCriteriaList,
         generation_config: GenerationConfig,
@@ -2900,8 +2896,6 @@ class GenerationMixin:
             # 기존 CG detector
             cg_conflict = IG + abs(entropy) * e < 0
 
-            cg_high_conflict = IG > cg_high_threshold
-
             # RankShift detector
             rs_conflict = _ck_rankshift_conflict(
                 para_logits=next_token_logits_student,
@@ -2920,8 +2914,6 @@ class GenerationMixin:
 
             if detector == "cg":
                 is_adjust = cg_conflict
-            elif detector == "cg_high":
-                is_adjust = cg_high_conflict
             elif detector == "rankshift":
                 is_adjust = rs_conflict
             elif detector == "topk_overlap":

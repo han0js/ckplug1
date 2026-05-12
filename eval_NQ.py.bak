@@ -18,7 +18,7 @@ class LLamaQaStoppingCriteria(StoppingCriteria):
         for token_ids_sequence in list_token_ids_sequence:
             self.token_ids_sequences.append(torch.tensor(token_ids_sequence, dtype=torch.long))
             self.lengths.append(len(token_ids_sequence))
-
+        
     # @add_start_docstrings(STOPPING_CRITERIA_INPUTS_DOCSTRING)
     def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor, **kwargs) -> bool:
         # check the final {self.length} tokens
@@ -44,7 +44,7 @@ def set_stop_words(tokenizer, stop):
     return stopping_criteria
 
 def call_ck(model, base_prompts, context_prompts, stop, params_dict):
-
+    
     sequences = model.generate(base_prompts, context_prompts, **params_dict)
 
     for stop_word in stop:
@@ -68,7 +68,7 @@ def normalize_answer(s):
     return white_space_fix(remove_articles(remove_punc(lower(s))))
 
 def exact_match_score(prediction, ground_truth):
-    return (normalize_answer(prediction) == normalize_answer(ground_truth))
+    return (normalize_answer(prediction) == normalize_answer(ground_truth))    
 
 def recall_score(prediction, ground_truth):
     prediction = normalize_answer(prediction)
@@ -114,23 +114,23 @@ def qa_to_prompt_baseline(query, context, schema):
     prompt = prompt + get_prompt(query, context, schema=schema)
     return prompt
 
-
+    
 def eval(pred_answers, orig_answers, gold_answers):
     em, ps = get_score(pred_answers, gold_answers)
     _, po = get_score(pred_answers, orig_answers)
     mr = po / (ps + po + 1e-10) * 100
     print('ps {}, po {}, mr {}, em {}.'.format(ps, po, mr, em))
-
+    
 def create_log_path(log_path):
     if not os.path.exists(log_path):
         with open(log_path, 'w') as f:
-            f.write('')
+            f.write('') 
         logging.info(f"Log file {log_path} created.")
     else:
         logging.info(f"Log file {log_path} already exists.")
 
 def main():
-
+    
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name", default="./model_path", type=str)
     parser.add_argument("--orig_path", default="./kr_data/datasets/nq/orig_dev_filtered.json", type=str)
@@ -139,26 +139,12 @@ def main():
     parser.add_argument("--num-gpus", type=str, default="1")
     parser.add_argument("--max_gpu_memory", type=int, default=27)
     parser.add_argument("--device", type=str, choices=["cuda", "cpu"], default="cuda")
-    parser.add_argument('--mode', type=str, default='ck',
+    parser.add_argument('--mode', type=str, default='ck', 
                     help='ck, base_rag, base_no_rag')
     parser.add_argument('--alpha', type=float, default=0.5)
     parser.add_argument('--adaptive', type=bool, default=False)
-    parser.add_argument(
-        "--detector",
-        type=str,
-        default="cg",
-        choices=["cg", "cg_high", "rankshift", "topk_overlap", "cg_or_rs", "cg_and_rs"],
-    )
-    parser.add_argument("--cg_high_threshold", type=float, default=0.83)
-    parser.add_argument("--rank_k", type=int, default=20)
-    parser.add_argument("--rank_shift_threshold", type=int, default=50)
-    parser.add_argument("--rank_margin", type=int, default=5)
-    parser.add_argument("--topk_overlap_threshold", type=float, default=0.4)
-    parser.add_argument("--log_path", default=None, type=str)
-
+    
     args = parser.parse_args()
-    if not hasattr(args, 'log_path'):
-        args.log_path = None
     with open(args.orig_path, 'r') as fh:
         orig_examples = json.load(fh)
     with open(args.counter_path, 'r') as fh:
@@ -175,39 +161,19 @@ def main():
     stop = []
     model.set_stop_words(stop)
 
-    # params_dict = {
-    #         "repetition_penalty": 1.0,
-    #         "temperature": 1.0,
-    #         "top_p": 1.0,
-    #         "top_k": 100,
-    #         "max_new_tokens": 64,
-    #         "logprobs": None,
-    #         "mode": args.mode,
-    #         "alpha": args.alpha,
-    #         "adaptive": args.adaptive,
-    #         "select_top": 10,
-    #     }
     params_dict = {
-        "repetition_penalty": 1.0,
-        "temperature": 1.0,
-        "top_p": 1.0,
-        "top_k": 100,
-        "max_new_tokens": 64,
-        "logprobs": None,
-        "mode": args.mode,
-        "alpha": args.alpha,
-        "adaptive": args.adaptive,
-        "select_top": 10,
-
-        # detector options
-        "detector": args.detector,
-        "rank_k": args.rank_k,
-        "rank_shift_threshold": args.rank_shift_threshold,
-        "rank_margin": args.rank_margin,
-        "topk_overlap_threshold": args.topk_overlap_threshold,
-        "cg_high_threshold": args.cg_high_threshold,
-    }
-
+            "repetition_penalty": 1.0,
+            "temperature": 1.0,
+            "top_p": 1.0,
+            "top_k": 100,
+            "max_new_tokens": 64,
+            "logprobs": None,
+            "mode": args.mode,
+            "alpha": args.alpha,
+            "adaptive": args.adaptive,
+            "select_top": 10,
+        }
+    
     step = 0
     gold_answers, pred_answers, orig_answers = [], [], []
     record = []
@@ -228,20 +194,6 @@ def main():
         gold_answers.append(answer)
         orig_answers.append(orig_answer)
 
-        record.append({
-            "question": query,
-            "context": context,
-            "prediction": pred,
-            "context_answer": answer,
-            "parametric_answer": orig_answer,
-            "mode": args.mode,
-            "alpha": args.alpha,
-            "detector": args.detector,
-            "rank_k": args.rank_k,
-            "rank_shift_threshold": args.rank_shift_threshold,
-            "rank_margin": args.rank_margin,
-        })
-
     if args.log_path:
         with open(args.log_path, 'w') as fh:
             json.dump(record, fh, indent=4,)
@@ -250,7 +202,7 @@ def main():
         print(f"{arg}: {value}")
     eval(pred_answers, orig_answers, gold_answers)
 
-
+    
 
 if __name__ == '__main__':
     main()

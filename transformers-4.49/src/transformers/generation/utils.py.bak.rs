@@ -26,80 +26,6 @@ import torch.distributed as dist
 from torch import nn
 from torch.nn import functional as F
 
-def _ck_rankshift_conflict(para_logits, rag_logits, k=20, shift_threshold=50):
-    """
-    Label-free RankShift detector.
-
-    para_logits: logits from p(x | Xq), shape [batch, vocab]
-    rag_logits:  logits from p(x | Xr + Xq), shape [batch, vocab]
-
-    Return:
-        bool. True이면 conflict token으로 보고 CK modulation 적용.
-    """
-    if para_logits.dim() == 1:
-        para_logits = para_logits.unsqueeze(0)
-    if rag_logits.dim() == 1:
-        rag_logits = rag_logits.unsqueeze(0)
-
-    batch_size, vocab_size = para_logits.shape
-    k = min(k, vocab_size)
-
-    para_topk = torch.topk(para_logits, k=k, dim=-1).indices
-    rag_topk = torch.topk(rag_logits, k=k, dim=-1).indices
-
-    # full-rank 계산. 1차 실험용이라 명확성을 우선.
-    para_sorted = torch.argsort(para_logits, dim=-1, descending=True)
-    rag_sorted = torch.argsort(rag_logits, dim=-1, descending=True)
-
-    para_ranks = torch.empty_like(para_sorted)
-    rag_ranks = torch.empty_like(rag_sorted)
-
-    rank_values = torch.arange(
-        1,
-        vocab_size + 1,
-        device=para_logits.device,
-        dtype=para_sorted.dtype,
-    ).unsqueeze(0).expand(batch_size, -1)
-
-    para_ranks.scatter_(dim=-1, index=para_sorted, src=rank_values)
-    rag_ranks.scatter_(dim=-1, index=rag_sorted, src=rank_values)
-
-    # batch별로 top-k union 후보의 rank 변화량을 본다.
-    for b in range(batch_size):
-        cand = torch.unique(torch.cat([para_topk[b], rag_topk[b]], dim=0))
-        shift = torch.abs(para_ranks[b, cand] - rag_ranks[b, cand])
-        if shift.max().item() > shift_threshold:
-            return True
-
-    return False
-
-
-def _ck_topk_overlap_conflict(para_logits, rag_logits, k=20, overlap_threshold=0.4):
-    """
-    Top-k overlap detector.
-    overlap이 낮으면 context 삽입 후 후보군이 많이 바뀐 것이므로 conflict로 판단.
-    """
-    if para_logits.dim() == 1:
-        para_logits = para_logits.unsqueeze(0)
-    if rag_logits.dim() == 1:
-        rag_logits = rag_logits.unsqueeze(0)
-
-    batch_size, vocab_size = para_logits.shape
-    k = min(k, vocab_size)
-
-    para_topk = torch.topk(para_logits, k=k, dim=-1).indices
-    rag_topk = torch.topk(rag_logits, k=k, dim=-1).indices
-
-    for b in range(batch_size):
-        para_set = set(para_topk[b].detach().cpu().tolist())
-        rag_set = set(rag_topk[b].detach().cpu().tolist())
-        overlap = len(para_set & rag_set) / float(k)
-
-        if overlap < overlap_threshold:
-            return True
-
-    return False
-
 from ..cache_utils import (
     Cache,
     DynamicCache,
@@ -224,7 +150,7 @@ class GenerateDecoderOnlyOutput(ModelOutput):
     attentions: Optional[Tuple[Tuple[torch.FloatTensor]]] = None
     hidden_states: Optional[Tuple[Tuple[torch.FloatTensor]]] = None
     past_key_values: Optional[Tuple[Tuple[Tuple[torch.FloatTensor]]]] = None
-
+    
 
 
 @dataclass
@@ -1951,29 +1877,6 @@ class GenerationMixin:
         generation_config._pad_token_tensor = pad_token_tensor
         generation_config._decoder_start_token_tensor = decoder_start_token_tensor
 
-    # @torch.no_grad()
-    # def generate(
-    #     self,
-    #     inputs: Optional[torch.Tensor] = None,
-    #     inputs_student: Optional[torch.Tensor] = None,
-    #     generation_config: Optional[GenerationConfig] = None,
-    #     generation_config_student: Optional[GenerationConfig] = None,
-    #     ck_decoding: Optional[bool] = None,
-    #     alpha: Optional[float] = 0.1,
-    #     adaptive: Optional[bool] = True,
-    #     select_top: Optional[int] = 10,
-    #     logits_processor: Optional[LogitsProcessorList] = None,
-    #     logits_processor_student: Optional[LogitsProcessorList] = None,
-    #     stopping_criteria: Optional[StoppingCriteriaList] = None,
-    #     prefix_allowed_tokens_fn: Optional[Callable[[int, torch.Tensor], List[int]]] = None,
-    #     synced_gpus: Optional[bool] = None,
-    #     assistant_model: Optional["PreTrainedModel"] = None,
-    #     streamer: Optional["BaseStreamer"] = None,
-    #     negative_prompt_ids: Optional[torch.Tensor] = None,
-    #     negative_prompt_attention_mask: Optional[torch.Tensor] = None,
-    #     **kwargs,
-    # ) -> Union[GenerateOutput, torch.LongTensor]:
-
     @torch.no_grad()
     def generate(
         self,
@@ -1985,15 +1888,6 @@ class GenerationMixin:
         alpha: Optional[float] = 0.1,
         adaptive: Optional[bool] = True,
         select_top: Optional[int] = 10,
-
-        # RankShift detector options
-        detector: str = "cg",
-        rank_k: int = 20,
-        rank_shift_threshold: int = 50,
-        rank_margin: int = 5,
-        topk_overlap_threshold: float = 0.4,
-        cg_high_threshold: float = 0.83,
-
         logits_processor: Optional[LogitsProcessorList] = None,
         logits_processor_student: Optional[LogitsProcessorList] = None,
         stopping_criteria: Optional[StoppingCriteriaList] = None,
@@ -2240,7 +2134,7 @@ class GenerationMixin:
 
         if self._supports_logits_to_keep() and "logits_to_keep" not in model_kwargs_student:
             model_kwargs_student["logits_to_keep"] = 1
-
+        
         self._validate_generated_length(generation_config, input_ids_length, has_default_max_length)
 
         # 7. Prepare the cache.
@@ -2343,33 +2237,10 @@ class GenerationMixin:
             )
 
             # 12. run assisted generate
-            # result = self._assisted_decoding(
-            #     input_ids,
-            #     candidate_generator=candidate_generator,
-            #     logits_processor=prepared_logits_processor,
-            #     stopping_criteria=prepared_stopping_criteria,
-            #     generation_config=generation_config,
-            #     synced_gpus=synced_gpus,
-            #     streamer=streamer,
-            #     **model_kwargs,
-            # )
-            result = self._ck_decoding(
+            result = self._assisted_decoding(
                 input_ids,
-                input_ids_student,
-                alpha=alpha,
-                adaptive=adaptive,
-                select_top=select_top,
-
-                # detector options
-                detector=detector,
-                rank_k=rank_k,
-                rank_shift_threshold=rank_shift_threshold,
-                rank_margin=rank_margin,
-                topk_overlap_threshold=topk_overlap_threshold,
-                cg_high_threshold=cg_high_threshold,
-
+                candidate_generator=candidate_generator,
                 logits_processor=prepared_logits_processor,
-                logits_processor_student=prepared_logits_processor_student,
                 stopping_criteria=prepared_stopping_criteria,
                 generation_config=generation_config,
                 synced_gpus=synced_gpus,
@@ -2405,14 +2276,6 @@ class GenerationMixin:
                 alpha=alpha,
                 adaptive=adaptive,
                 select_top=select_top,
-
-                detector=detector,
-                rank_k=rank_k,
-                rank_shift_threshold=rank_shift_threshold,
-                rank_margin=rank_margin,
-                topk_overlap_threshold=topk_overlap_threshold,
-                cg_high_threshold=cg_high_threshold,
-
                 logits_processor=prepared_logits_processor,
                 logits_processor_student=prepared_logits_processor_student,
                 stopping_criteria=prepared_stopping_criteria,
@@ -2751,22 +2614,12 @@ class GenerationMixin:
         logits_processor: LogitsProcessorList,
         logits_processor_student: LogitsProcessorList,
         select_top: int,
-
-        # detector options
-        detector: str,
-        rank_k: int,
-        rank_shift_threshold: int,
-        rank_margin: int,
-        topk_overlap_threshold: float,
-        cg_high_threshold: float,
-
         stopping_criteria: StoppingCriteriaList,
         generation_config: GenerationConfig,
         synced_gpus: bool,
         streamer: "BaseStreamer",
         **model_kwargs,
     ) -> Union[GenerateNonBeamOutput, torch.LongTensor]:
-
         r"""
         Generates sequences of token ids for models with a language modeling head using **multinomial sampling** and
         can be used for text-decoder, text-to-text, speech-to-text, and vision-to-text models.
@@ -2894,47 +2747,12 @@ class GenerationMixin:
 
             entropy = -torch.sum(probs * torch.log(probs + 1e-9), dim=-1).item()
             entropy_student = -torch.sum(probs_student * torch.log(probs_student + 1e-9), dim=-1).item()
+
             IG = entropy_student - entropy
             e = -1.0
-
-            # 기존 CG detector
-            cg_conflict = IG + abs(entropy) * e < 0
-
-            cg_high_conflict = IG > cg_high_threshold
-
-            # RankShift detector
-            rs_conflict = _ck_rankshift_conflict(
-                para_logits=next_token_logits_student,
-                rag_logits=next_token_logits,
-                k=rank_k,
-                shift_threshold=rank_shift_threshold,
-            )
-
-            # Top-k overlap detector
-            overlap_conflict = _ck_topk_overlap_conflict(
-                para_logits=next_token_logits_student,
-                rag_logits=next_token_logits,
-                k=rank_k,
-                overlap_threshold=topk_overlap_threshold,
-            )
-
-            if detector == "cg":
-                is_adjust = cg_conflict
-            elif detector == "cg_high":
-                is_adjust = cg_high_conflict
-            elif detector == "rankshift":
-                is_adjust = rs_conflict
-            elif detector == "topk_overlap":
-                is_adjust = overlap_conflict
-            elif detector == "cg_or_rs":
-                is_adjust = cg_conflict or rs_conflict
-            elif detector == "cg_and_rs":
-                is_adjust = cg_conflict and rs_conflict
-            else:
-                is_adjust = cg_conflict
-
-            is_adaptive = adaptive
-
+            is_adjust = IG + abs(entropy) * e < 0
+            is_adaptive = adaptive # control if adaptive enhance without alpha
+            
             if is_adjust:
                 next_token_logits_student[mask] = -1e3
                 logits_context = next_token_logits - next_token_logits_student
@@ -3028,8 +2846,8 @@ class GenerationMixin:
             return input_ids
 
 
-
-
+        
+    
 
     def _dola_decoding(
         self,

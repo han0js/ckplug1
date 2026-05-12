@@ -147,9 +147,8 @@ def main():
         "--detector",
         type=str,
         default="cg",
-        choices=["cg", "cg_high", "rankshift", "topk_overlap", "cg_or_rs", "cg_and_rs"],
+        choices=["cg", "rankshift", "topk_overlap", "cg_or_rs", "cg_and_rs"],
     )
-    parser.add_argument("--cg_high_threshold", type=float, default=0.83)
     parser.add_argument("--rank_k", type=int, default=20)
     parser.add_argument("--rank_shift_threshold", type=int, default=50)
     parser.add_argument("--rank_margin", type=int, default=5)
@@ -205,7 +204,6 @@ def main():
         "rank_shift_threshold": args.rank_shift_threshold,
         "rank_margin": args.rank_margin,
         "topk_overlap_threshold": args.topk_overlap_threshold,
-        "cg_high_threshold": args.cg_high_threshold,
     }
 
     step = 0

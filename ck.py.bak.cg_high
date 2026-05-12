@@ -77,7 +77,6 @@ class CK:
         base_prompt,
         context_prompt,
         alpha=0.0,
-        cg_high_threshold=0.83,
         select_top=10,
         adaptive=False,
         max_new_tokens=32,
@@ -141,7 +140,6 @@ class CK:
                     rank_shift_threshold=rank_shift_threshold,
                     rank_margin=rank_margin,
                     topk_overlap_threshold=topk_overlap_threshold,
-                    cg_high_threshold=cg_high_threshold,
 
                     top_p=top_p,
                     top_k=top_k,

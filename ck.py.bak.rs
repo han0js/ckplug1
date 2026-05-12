@@ -10,7 +10,7 @@ class LLamaQaStoppingCriteria(StoppingCriteria):
         for token_ids_sequence in list_token_ids_sequence:
             self.token_ids_sequences.append(torch.tensor(token_ids_sequence, dtype=torch.long))
             self.lengths.append(len(token_ids_sequence))
-
+        
     # @add_start_docstrings(STOPPING_CRITERIA_INPUTS_DOCSTRING)
     def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor, **kwargs) -> bool:
         # check the final {self.length} tokens
@@ -23,7 +23,7 @@ class LLamaQaStoppingCriteria(StoppingCriteria):
                     stop = True
                     break
         return stop
-
+    
 class CK:
 
     def __init__(self, model_name, device, num_gpus, max_gpu_memory=27):
@@ -51,16 +51,16 @@ class CK:
             kwargs = {}
         else:
             raise ValueError(f"Invalid device: {self.device}")
-
+        
         tokenizer = AutoTokenizer.from_pretrained(model_name if not 'vicuna' in model_name else 'huggyllama/llama-7b')
         model = AutoModelForCausalLM.from_pretrained(model_name,
             low_cpu_mem_usage=True, **kwargs)
 
         if self.device == "cuda" and self.num_gpus == 1:
             model.cuda()
-
+        
         return model, tokenizer
-
+    
     def set_stop_words(self, stop_words):
         self.stop_words = stop_words
         self.stopping_criteria = StoppingCriteriaList()
@@ -71,31 +71,9 @@ class CK:
             print("Added stop word: ", stop_word, 'with the ids', stop_word_ids, flush=True)
         self.stopping_criteria.append(LLamaQaStoppingCriteria(list_stop_word_ids))
 
-    # def generate(self, base_prompt, context_prompt, alpha=0.0, select_top=10, adaptive=False, max_new_tokens=32, top_p=1, top_k=1, temperature=1.0, mode='base_no_rag', verbose=False, remove_stop_words=False, relative_top=0.1, **kwargs):
-    def generate(
-        self,
-        base_prompt,
-        context_prompt,
-        alpha=0.0,
-        cg_high_threshold=0.83,
-        select_top=10,
-        adaptive=False,
-        max_new_tokens=32,
-        top_p=1,
-        top_k=1,
-        temperature=1.0,
-        mode='base_no_rag',
-        verbose=False,
-        remove_stop_words=False,
-        relative_top=0.1,
-        detector="cg",
-        rank_k=20,
-        rank_shift_threshold=50,
-        rank_margin=5,
-        topk_overlap_threshold=0.4,
-        **kwargs):
+    def generate(self, base_prompt, context_prompt, alpha=0.0, select_top=10, adaptive=False, max_new_tokens=32, top_p=1, top_k=1, temperature=1.0, mode='base_no_rag', verbose=False, remove_stop_words=False, relative_top=0.1, **kwargs):
         with torch.no_grad():
-
+            
             if mode == 'base_no_rag':
                 assert base_prompt is not None, "base_prompt must be specified"
                 base_ids = self.tokenizer(base_prompt, return_tensors="pt").input_ids.to(self.device)
@@ -111,7 +89,7 @@ class CK:
                 outputs = self.model.generate(context_ids, max_length=max_len, num_return_sequences=1,
                                     output_scores=True, return_dict_in_generate=True, ck_decoding=False,
                                     top_p=top_p, top_k=top_k, temperature=temperature, stopping_criteria=self.stopping_criteria, **kwargs)
-
+            
             elif mode == 'ck':
                 assert base_prompt is not None, "base_prompt must be specified"
                 assert context_prompt is not None, "context_prompt must be specified"
@@ -120,34 +98,9 @@ class CK:
                 context_ids = self.tokenizer(context_prompt, return_tensors="pt").input_ids.to(self.device)
                 max_len_context = context_ids.shape[-1] + max_new_tokens
                 max_len = max(max_len_base, max_len_context)
-                # outputs = self.model.generate(context_ids, base_ids, alpha = alpha, max_length=max_len, num_return_sequences=1,
-                #                         output_scores=True, return_dict_in_generate=True, ck_decoding=True, select_top=select_top, adaptive=adaptive,
-                #                         top_p=top_p, top_k=top_k, temperature=temperature, stopping_criteria=self.stopping_criteria, **kwargs,)
-                outputs = self.model.generate(
-                    context_ids,
-                    base_ids,
-                    alpha=alpha,
-                    max_length=max_len,
-                    num_return_sequences=1,
-                    output_scores=True,
-                    return_dict_in_generate=True,
-                    ck_decoding=True,
-                    select_top=select_top,
-                    adaptive=adaptive,
-
-                    # RankShift / detector options
-                    detector=detector,
-                    rank_k=rank_k,
-                    rank_shift_threshold=rank_shift_threshold,
-                    rank_margin=rank_margin,
-                    topk_overlap_threshold=topk_overlap_threshold,
-                    cg_high_threshold=cg_high_threshold,
-
-                    top_p=top_p,
-                    top_k=top_k,
-                    temperature=temperature,
-                    stopping_criteria=self.stopping_criteria,
-                    **kwargs,)
+                outputs = self.model.generate(context_ids, base_ids, alpha = alpha, max_length=max_len, num_return_sequences=1,
+                                        output_scores=True, return_dict_in_generate=True, ck_decoding=True, select_top=select_top, adaptive=adaptive,
+                                        top_p=top_p, top_k=top_k, temperature=temperature, stopping_criteria=self.stopping_criteria, **kwargs,)
 
 
             sequences = outputs.sequences
